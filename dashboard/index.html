@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bin Level Sensor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #101827;
+      --card: #192438;
+      --text: #eef4ff;
+      --muted: #9fb0c9;
+      --accent: #61dafb;
+      --good: #52d273;
+      --warn: #f5c451;
+      --bad: #ff6b6b;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 32px 16px;
+      background: radial-gradient(circle at top, #203653, var(--background) 55%);
+      color: var(--text);
+      font: 16px/1.5 system-ui, sans-serif;
+    }
+    main { max-width: 760px; margin: auto; }
+    h1 { margin-bottom: 4px; }
+    .subtitle, .hint { color: var(--muted); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 24px 0; }
+    button {
+      border: 0; border-radius: 8px; padding: 11px 16px;
+      background: var(--accent); color: #07121e; cursor: pointer; font-weight: 700;
+    }
+    button.secondary { background: #334762; color: var(--text); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
+    .card { padding: 22px; background: var(--card); border: 1px solid #2e405b; border-radius: 14px; }
+    .label { color: var(--muted); font-size: .9rem; }
+    .value { margin-top: 6px; font-size: 2.2rem; font-weight: 800; }
+    .status { color: var(--good); }
+    .status.ok { color: var(--warn); }
+    .status.full { color: var(--bad); }
+    .meter { height: 22px; margin-top: 12px; overflow: hidden; background: #0c1320; border-radius: 99px; }
+    .fill { height: 100%; width: 0; background: var(--good); transition: width .3s, background .3s; }
+    .fill.ok { background: var(--warn); }
+    .fill.full { background: var(--bad); }
+    #log { min-height: 24px; margin-top: 24px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Bin Level Sensor</h1>
+    <div class="subtitle">Arduino Uno R3 live monitoring dashboard</div>
+
+    <div class="actions">
+      <button id="connect">Connect Arduino</button>
+      <button id="demo" class="secondary">Demo mode</button>
+    </div>
+
+    <section class="grid" aria-live="polite">
+      <div class="card">
+        <div class="label">Fill level</div>
+        <div id="percent" class="value">--%</div>
+        <div class="meter"><div id="fill" class="fill"></div></div>
+      </div>
+      <div class="card">
+        <div class="label">Distance to contents</div>
+        <div id="distance" class="value">-- cm</div>
+      </div>
+      <div class="card">
+        <div class="label">Status</div>
+        <div id="status" class="value status">WAITING</div>
+      </div>
+    </section>
+    <div id="log" class="hint">Connect the Arduino or start demo mode.</div>
+  </main>
+
+  <script>
+    const percentElement = document.querySelector("#percent");
+    const distanceElement = document.querySelector("#distance");
+    const statusElement = document.querySelector("#status");
+    const fillElement = document.querySelector("#fill");
+    const logElement = document.querySelector("#log");
+    let reader;
+
+    function updateReading(distance, percent, status) {
+      const safePercent = Math.max(0, Math.min(100, Number(percent)));
+      const normalizedStatus = String(status).toUpperCase();
+      const levelClass = normalizedStatus === "FULL" ? "full" :
+        normalizedStatus === "OK" ? "ok" : "";
+      percentElement.textContent = `${Math.round(safePercent)}%`;
+      distanceElement.textContent = `${Number(distance).toFixed(2)} cm`;
+      statusElement.textContent = normalizedStatus;
+      statusElement.className = `value status ${levelClass}`;
+      fillElement.style.width = `${safePercent}%`;
+      fillElement.className = `fill ${levelClass}`;
+    }
+
+    function parseLine(line) {
+      const fields = line.trim().split(",");
+      if (fields.length !== 4 || fields[0] !== "BIN" ||
+          fields[1] === "NA" || fields[2] === "NA") {
+        return false;
+      }
+      updateReading(fields[1], fields[2], fields[3]);
+      return true;
+    }
+
+    async function connectArduino() {
+      if (!("serial" in navigator)) {
+        logElement.textContent = "Web Serial is unavailable. Use Chrome or Edge on localhost.";
+        return;
+      }
+      try {
+        const port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+        reader = port.readable.pipeThrough(new TextDecoderStream()).getReader();
+        logElement.textContent = "Connected at 9600 baud.";
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          const lines = buffer.split("\n");
+          buffer = lines.pop();
+          lines.forEach(parseLine);
+        }
+      } catch (error) {
+        logElement.textContent = `Connection stopped: ${error.message}`;
+      }
+    }
+
+    function startDemo() {
+      let value = 18;
+      logElement.textContent = "Demo mode is running.";
+      setInterval(() => {
+        value = value >= 92 ? 18 : value + 4;
+        const status = value <= 25 ? "EMPTY" : value <= 75 ? "OK" : "FULL";
+        const distance = 30 - (value / 100) * 25;
+        updateReading(distance, value, status);
+      }, 1000);
+    }
+
+    document.querySelector("#connect").addEventListener("click", connectArduino);
+    document.querySelector("#demo").addEventListener("click", startDemo);
+  </script>
+</body>
+</html>
